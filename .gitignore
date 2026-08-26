@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# secrets
+.Renviron
+.env
+.env.*
+
+# temp
+tmp/
+temp/
+*.tmp
+*.bak
+
+# large / legacy
+archive/
+pca_refit_bootstrap.RData
+
+# research data and binary outputs
+data/raw/
+*.rds
+*.RData
+*.rda
+
+# non-deployment material
+Readings/
+manuscript/
+docs/meetings/
+docs/audit/
+results/manuscript/
+results/figures/
+results/tables/
+results/enrichment/
+scripts/legacy/
+scripts/optional/
