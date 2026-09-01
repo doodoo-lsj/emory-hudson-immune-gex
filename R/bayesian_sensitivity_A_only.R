@@ -55,7 +55,7 @@ bayes_A_residual_correlation_array <- function(residual_draws, mediators = bayes
 }
 
 validate_bayesian_A_residual_draws <- function(residual_draws) {
-  required <- c("n_draws", "sig", "sigma_y", "beta", "alpha", "direct")
+  required <- c("n_draws", "sig", "sigma_y", "beta", "alpha", "total_effect", "outcome_direct_coef")
   missing <- setdiff(required, names(residual_draws))
   if (length(missing) > 0) {
     stop("Bayesian Sensitivity A residual draw bundle is missing: ", paste(missing, collapse = ", "), call. = FALSE)
@@ -76,8 +76,11 @@ validate_bayesian_A_residual_draws <- function(residual_draws) {
   if (!all(exposures %in% names(residual_draws$alpha))) {
     stop("residual_draws$alpha must contain exposure entries: ", paste(exposures, collapse = ", "), call. = FALSE)
   }
-  if (!all(exposures %in% colnames(residual_draws$direct))) {
-    stop("residual_draws$direct must contain exposure columns: ", paste(exposures, collapse = ", "), call. = FALSE)
+  if (!all(exposures %in% colnames(residual_draws$total_effect))) {
+    stop("residual_draws$total_effect must contain exposure columns: ", paste(exposures, collapse = ", "), call. = FALSE)
+  }
+  if (!all(exposures %in% colnames(residual_draws$outcome_direct_coef))) {
+    stop("residual_draws$outcome_direct_coef must contain exposure columns: ", paste(exposures, collapse = ", "), call. = FALSE)
   }
 
   n_draws <- residual_draws$n_draws
@@ -85,7 +88,8 @@ validate_bayesian_A_residual_draws <- function(residual_draws) {
     nrow(residual_draws$sig),
     length(residual_draws$sigma_y),
     nrow(residual_draws$beta),
-    nrow(residual_draws$direct),
+    nrow(residual_draws$total_effect),
+    nrow(residual_draws$outcome_direct_coef),
     vapply(exposures, function(exposure) nrow(residual_draws$alpha[[exposure]]), integer(1))
   )
   if (!all(lengths == n_draws)) {
@@ -154,10 +158,11 @@ bayes_A_wide_for_exposure <- function(residual_draws, exposure, beta = residual_
   n_draws <- residual_draws$n_draws
   alpha_mat <- residual_draws$alpha[[exposure]][, mediators, drop = FALSE]
   beta_mat <- beta[, mediators, drop = FALSE]
-  direct_vec <- residual_draws$direct[, exposure]
+  TE <- residual_draws$total_effect[, exposure]
+  outcome_direct_coef <- residual_draws$outcome_direct_coef[, exposure]
   IIE <- alpha_mat * beta_mat
   total_IIE <- rowSums(IIE)
-  TE <- direct_vec + total_IIE
+  direct_vec <- TE - total_IIE
   PM <- total_IIE / TE
 
   out <- tibble::tibble(
@@ -165,6 +170,7 @@ bayes_A_wide_for_exposure <- function(residual_draws, exposure, beta = residual_
     exposure = exposure,
     contrast = bayes_A_contrast_label(exposure, residual_draws),
     direct_effect = direct_vec,
+    outcome_direct_coef = outcome_direct_coef,
     total_IIE = total_IIE,
     TE = TE,
     PM = PM
@@ -207,7 +213,7 @@ compute_bayesian_A_baseline_from_residual_draws <- function(residual_draws) {
 
   path_draws <- bayes_A_path_from_wide(wide)
   decomposition_draws <- wide |>
-    dplyr::select(draw, exposure, contrast, direct_effect, total_IIE, TE, PM)
+    dplyr::select(draw, exposure, contrast, direct_effect, outcome_direct_coef, total_IIE, TE, PM)
 
   list(
     wide = wide,
@@ -231,7 +237,7 @@ compute_bayesian_A_baseline_from_residual_draws <- function(residual_draws) {
         .groups = "drop"
       ),
     decomposition_summary = decomposition_draws |>
-      tidyr::pivot_longer(cols = c(direct_effect, total_IIE, TE, PM), names_to = "quantity", values_to = "value") |>
+      tidyr::pivot_longer(cols = c(direct_effect, outcome_direct_coef, total_IIE, TE, PM), names_to = "quantity", values_to = "value") |>
       summarize_bayesian_A_draws(group_cols = c("contrast", "exposure", "quantity")) |>
       tidyr::pivot_wider(
         names_from = quantity,
@@ -318,13 +324,15 @@ compute_bayesian_sensitivity_A_from_draws <- function(residual_draws,
 
   make_contrast <- function(exposure) {
     alpha <- residual_draws$alpha[[exposure]][, mediators, drop = FALSE]
-    direct <- residual_draws$direct[, exposure]
+    TE <- residual_draws$total_effect[, exposure]
+    outcome_direct_coef <- residual_draws$outcome_direct_coef[, exposure]
 
     out <- rows |>
       dplyr::mutate(
         exposure = exposure,
         contrast = bayes_A_contrast_label(exposure, residual_draws),
-        direct_effect = direct[draw]
+        TE = TE[draw],
+        outcome_direct_coef = outcome_direct_coef[draw]
       )
     total_IIE <- rep(0, nrow(out))
     for (m in mediators) {
@@ -333,7 +341,7 @@ compute_bayesian_sensitivity_A_from_draws <- function(residual_draws,
       total_IIE <- total_IIE + out[[paste0("IIE_", m)]]
     }
     out$total_IIE <- total_IIE
-    out$TE <- out$direct_effect + out$total_IIE
+    out$direct_effect <- out$TE - out$total_IIE
     out$PM <- out$total_IIE / out$TE
     out
   }
@@ -344,7 +352,7 @@ compute_bayesian_sensitivity_A_from_draws <- function(residual_draws,
     dplyr::select(
       scenario, mediator_varied, rho, dplyr::all_of(rho_cols),
       draw, valid_parameter, feasibility, exposure, contrast,
-      direct_effect, total_IIE, TE, PM
+      direct_effect, outcome_direct_coef, total_IIE, TE, PM
     )
 
   group_cols <- c("scenario", "mediator_varied", "rho", rho_cols, "contrast", "exposure")
@@ -374,7 +382,7 @@ compute_bayesian_sensitivity_A_from_draws <- function(residual_draws,
       ),
     summary = summary_draws |>
       dplyr::filter(valid_parameter) |>
-      tidyr::pivot_longer(cols = c(direct_effect, total_IIE, TE, PM), names_to = "quantity", values_to = "value") |>
+      tidyr::pivot_longer(cols = c(direct_effect, outcome_direct_coef, total_IIE, TE, PM), names_to = "quantity", values_to = "value") |>
       summarize_bayesian_A_draws(group_cols = c(group_cols, "quantity")) |>
       tidyr::pivot_wider(
         names_from = quantity,
@@ -389,7 +397,7 @@ compute_bayesian_sensitivity_A_from_draws <- function(residual_draws,
         .groups = "drop"
       ),
     validation = list(
-      TE_identity_max_abs = max(abs(wide$TE - wide$direct_effect - wide$total_IIE), na.rm = TRUE),
+      TE_fixed_decomposition_max_abs = max(abs(wide$TE - wide$direct_effect - wide$total_IIE), na.rm = TRUE),
       rho0_available = any(rowSums(abs(grid[, rho_cols, drop = FALSE])) == 0)
     )
   )
@@ -397,7 +405,7 @@ compute_bayesian_sensitivity_A_from_draws <- function(residual_draws,
 
 bayesian_A_identity_columns <- function(mediators = c("PC1_R", "PC2_R", "PC3")) {
   c(
-    "direct_effect", "total_IIE", "TE", "PM",
+    "direct_effect", "outcome_direct_coef", "total_IIE", "TE", "PM",
     paste0("alpha_", mediators),
     paste0("beta_", mediators),
     paste0("IIE_", mediators)

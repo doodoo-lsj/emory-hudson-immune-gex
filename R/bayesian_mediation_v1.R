@@ -550,10 +550,12 @@ compute_bayesian_mediation_v1_quantities <- function(fits,
   total_IIE_A <- IIE_PC1_A + IIE_PC2_A + IIE_PC3_A
   total_IIE_F <- IIE_PC1_F + IIE_PC2_F + IIE_PC3_F
 
-  direct_A <- extract_bayes_v1_b(d_y, "X_adjacent")
-  direct_F <- extract_bayes_v1_b(d_y, "X_far")
+  outcome_direct_A <- extract_bayes_v1_b(d_y, "X_adjacent")
+  outcome_direct_F <- extract_bayes_v1_b(d_y, "X_far")
   TE_A <- extract_bayes_v1_b(d_t, "X_adjacent")
   TE_F <- extract_bayes_v1_b(d_t, "X_far")
+  direct_A <- TE_A - total_IIE_A
+  direct_F <- TE_F - total_IIE_F
   PM_A <- total_IIE_A / TE_A
   PM_F <- total_IIE_F / TE_F
 
@@ -578,6 +580,8 @@ compute_bayesian_mediation_v1_quantities <- function(fits,
     total_IIE_F = total_IIE_F,
     direct_A = direct_A,
     direct_F = direct_F,
+    outcome_direct_A = outcome_direct_A,
+    outcome_direct_F = outcome_direct_F,
     TE_A = TE_A,
     TE_F = TE_F,
     PM_A = PM_A,
@@ -597,10 +601,12 @@ compute_bayesian_mediation_v1_quantities <- function(fits,
   decomposition_long <- dplyr::bind_rows(
     tibble::tibble(draw = wide$draw, contrast = "adjacent vs inside", exposure = "X_adjacent", quantity = "TE", value = wide$TE_A),
     tibble::tibble(draw = wide$draw, contrast = "adjacent vs inside", exposure = "X_adjacent", quantity = "direct_effect", value = wide$direct_A),
+    tibble::tibble(draw = wide$draw, contrast = "adjacent vs inside", exposure = "X_adjacent", quantity = "outcome_direct_coef", value = wide$outcome_direct_A),
     tibble::tibble(draw = wide$draw, contrast = "adjacent vs inside", exposure = "X_adjacent", quantity = "total_IIE", value = wide$total_IIE_A),
     tibble::tibble(draw = wide$draw, contrast = "adjacent vs inside", exposure = "X_adjacent", quantity = "PM", value = wide$PM_A),
     tibble::tibble(draw = wide$draw, contrast = "far vs inside", exposure = "X_far", quantity = "TE", value = wide$TE_F),
     tibble::tibble(draw = wide$draw, contrast = "far vs inside", exposure = "X_far", quantity = "direct_effect", value = wide$direct_F),
+    tibble::tibble(draw = wide$draw, contrast = "far vs inside", exposure = "X_far", quantity = "outcome_direct_coef", value = wide$outcome_direct_F),
     tibble::tibble(draw = wide$draw, contrast = "far vs inside", exposure = "X_far", quantity = "total_IIE", value = wide$total_IIE_F),
     tibble::tibble(draw = wide$draw, contrast = "far vs inside", exposure = "X_far", quantity = "PM", value = wide$PM_F)
   )
@@ -658,6 +664,110 @@ compute_bayesian_mediation_v1_quantities <- function(fits,
     sampled_indices = idx,
     available_draws = available_draws,
     n_draws = n_draws
+  )
+}
+
+extract_bayesian_v1_app_residual_draws <- function(fits,
+                                                   n_draws = NULL,
+                                                   seed = 123,
+                                                   sampled_indices = NULL) {
+  check_bayesian_v1_packages(require_brms = TRUE)
+
+  draws <- list(
+    mediator_joint = posterior::as_draws_df(fits$mediator_joint),
+    outcome = posterior::as_draws_df(fits$outcome),
+    total = posterior::as_draws_df(fits$total)
+  )
+  available <- vapply(draws, nrow, integer(1))
+
+  if (is.null(sampled_indices)) {
+    set.seed(seed)
+    if (is.null(n_draws)) {
+      n_draws <- min(available)
+    }
+    sampled_indices <- lapply(available, function(n) sample.int(n, size = n_draws, replace = TRUE))
+  } else {
+    required <- c("mediator_joint", "outcome", "total")
+    missing <- setdiff(required, names(sampled_indices))
+    if (length(missing) > 0) {
+      stop("sampled_indices is missing: ", paste(missing, collapse = ", "), call. = FALSE)
+    }
+    n_draws <- length(sampled_indices$mediator_joint)
+    if (length(sampled_indices$outcome) != n_draws || length(sampled_indices$total) != n_draws) {
+      stop("All sampled index vectors must have the same length.", call. = FALSE)
+    }
+  }
+
+  d_m <- draws$mediator_joint[sampled_indices$mediator_joint, , drop = FALSE]
+  d_y <- draws$outcome[sampled_indices$outcome, , drop = FALSE]
+  d_t <- draws$total[sampled_indices$total, , drop = FALSE]
+
+  mediators <- c("PC1_R", "PC2_R", "PC3")
+  exposures <- c("X_adjacent", "X_far")
+  contrast_labels <- c(X_adjacent = "adjacent vs inside", X_far = "far vs inside")
+
+  sig <- data.frame(
+    PC1_R = extract_bayes_v1_sigma(d_m, "PC1R"),
+    PC2_R = extract_bayes_v1_sigma(d_m, "PC2R"),
+    PC3 = extract_bayes_v1_sigma(d_m, "PC3"),
+    check.names = FALSE
+  )
+  R <- array(0, dim = c(n_draws, 3, 3), dimnames = list(NULL, mediators, mediators))
+  for (s in seq_len(n_draws)) {
+    R[s, , ] <- diag(1, 3)
+  }
+  R[, 1, 2] <- R[, 2, 1] <- extract_bayes_v1_rescor(d_m, "PC1R", "PC2R")
+  R[, 1, 3] <- R[, 3, 1] <- extract_bayes_v1_rescor(d_m, "PC1R", "PC3")
+  R[, 2, 3] <- R[, 3, 2] <- extract_bayes_v1_rescor(d_m, "PC2R", "PC3")
+
+  beta <- data.frame(
+    PC1_R = extract_bayes_v1_b(d_y, "PC1_R"),
+    PC2_R = extract_bayes_v1_b(d_y, "PC2_R"),
+    PC3 = extract_bayes_v1_b(d_y, "PC3"),
+    check.names = FALSE
+  )
+  alpha <- list(
+    X_adjacent = data.frame(
+      PC1_R = extract_bayes_v1_b(d_m, "X_adjacent", "PC1R"),
+      PC2_R = extract_bayes_v1_b(d_m, "X_adjacent", "PC2R"),
+      PC3 = extract_bayes_v1_b(d_m, "X_adjacent", "PC3"),
+      check.names = FALSE
+    ),
+    X_far = data.frame(
+      PC1_R = extract_bayes_v1_b(d_m, "X_far", "PC1R"),
+      PC2_R = extract_bayes_v1_b(d_m, "X_far", "PC2R"),
+      PC3 = extract_bayes_v1_b(d_m, "X_far", "PC3"),
+      check.names = FALSE
+    )
+  )
+  outcome_direct_coef <- data.frame(
+    X_adjacent = extract_bayes_v1_b(d_y, "X_adjacent"),
+    X_far = extract_bayes_v1_b(d_y, "X_far"),
+    check.names = FALSE
+  )
+  total_effect <- data.frame(
+    X_adjacent = extract_bayes_v1_b(d_t, "X_adjacent"),
+    X_far = extract_bayes_v1_b(d_t, "X_far"),
+    check.names = FALSE
+  )
+
+  list(
+    n_draws = n_draws,
+    mediators = mediators,
+    exposures = exposures,
+    contrast_labels = contrast_labels,
+    sig = sig,
+    R = R,
+    r12 = R[, 1, 2],
+    r13 = R[, 1, 3],
+    r23 = R[, 2, 3],
+    sigma_y = d_y[[find_bayes_v1_draw_column(d_y, c("sigma", "sigma_Y"), "outcome sigma")]],
+    beta = beta,
+    alpha = alpha,
+    outcome_direct_coef = outcome_direct_coef,
+    total_effect = total_effect,
+    sampled_indices = sampled_indices,
+    available_draws = available
   )
 }
 

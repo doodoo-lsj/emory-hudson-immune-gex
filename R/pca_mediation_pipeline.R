@@ -247,7 +247,8 @@ decompose_linear <- function(data, exposure, outcome, mediators, covariates = NU
     dplyr::mutate(indirect_component = alpha_X_to_M * beta_M_to_Y)
 
   NIE <- sum(path_tbl$indirect_component)
-  NDE <- stats::coef(fit_y)[exposure]
+  outcome_direct_coef <- stats::coef(fit_y)[exposure]
+  NDE <- TE - NIE
   PM <- NIE / TE
 
   summary_tbl <- tibble::tibble(
@@ -260,7 +261,8 @@ decompose_linear <- function(data, exposure, outcome, mediators, covariates = NU
     TE = TE,
     NDE = NDE,
     NIE = NIE,
-    PM = PM
+    PM = PM,
+    outcome_direct_coef = outcome_direct_coef
   )
 
   list(summary = summary_tbl, path = path_tbl, fit_total = fit_te, fit_outcome = fit_y)
@@ -337,7 +339,8 @@ decompose_linear_multix <- function(data,
     dplyr::summarise(NIE = sum(indirect_component), .groups = "drop") |>
     dplyr::mutate(
       TE = te_coef[exposure],
-      NDE = stats::coef(fit_y)[exposure],
+      outcome_direct_coef = stats::coef(fit_y)[exposure],
+      NDE = TE - NIE,
       PM = NIE / TE,
       mediators = paste(mediators, collapse = " + "),
       covariates = ifelse(
@@ -346,7 +349,7 @@ decompose_linear_multix <- function(data,
         paste(covariates, collapse = " + ")
       )
     ) |>
-    dplyr::select(exposure, mediators, covariates, TE, NDE, NIE, PM)
+    dplyr::select(exposure, mediators, covariates, TE, NDE, NIE, PM, outcome_direct_coef)
 
   list(summary = summary_tbl, path = path_tbl, fit_total = fit_te, fit_outcome = fit_y)
 }

@@ -59,6 +59,107 @@ validate_bayesian_app_artifact <- function(artifact) {
   invisible(TRUE)
 }
 
+bayesian_app_mcmc_diagnostics <- function(artifact) {
+  diagnostics <- artifact$diagnostics %||% NULL
+  if (is.null(diagnostics)) {
+    return(NULL)
+  }
+  if (inherits(diagnostics, "data.frame")) {
+    return(diagnostics)
+  }
+  if (is.list(diagnostics) && inherits(diagnostics$mcmc, "data.frame")) {
+    return(diagnostics$mcmc)
+  }
+  NULL
+}
+
+make_bayesian_app_artifact_from_v1_results <- function(results,
+                                                       dataset_id = "emory_hudson_immune_GEX_v2",
+                                                       posterior_mc_draws = NULL,
+                                                       seed = NULL) {
+  if (!exists("extract_bayesian_v1_app_residual_draws", mode = "function")) {
+    stop("Source R/bayesian_mediation_v1.R before creating a v1 app artifact.", call. = FALSE)
+  }
+  if (!exists("compute_bayesian_A_baseline_from_residual_draws", mode = "function")) {
+    stop("Source R/bayesian_sensitivity_A_only.R before creating a v1 app artifact.", call. = FALSE)
+  }
+
+  posterior_mc_draws <- posterior_mc_draws %||%
+    results$settings$posterior_mc_draws %||%
+    results$posterior_quantities$n_draws %||%
+    NULL
+  seed <- seed %||% results$settings$seed %||% 123
+
+  sampled_indices <- results$posterior_quantities$sampled_indices %||% NULL
+  residual_draws <- extract_bayesian_v1_app_residual_draws(
+    fits = results$models,
+    n_draws = posterior_mc_draws,
+    seed = seed + 100,
+    sampled_indices = sampled_indices
+  )
+  baseline <- compute_bayesian_A_baseline_from_residual_draws(residual_draws)
+
+  A0_common <- compute_bayesian_sensitivity_A_from_draws(
+    residual_draws = residual_draws,
+    rho_grid = 0,
+    mode = "common"
+  )
+  A0_one <- compute_bayesian_sensitivity_A_from_draws(
+    residual_draws = residual_draws,
+    rho_grid = 0,
+    mode = "one_at_a_time"
+  )
+
+  artifact <- list(
+    artifact_version = "emory_bayesian_app_artifact_v2_te_fixed",
+    created_at = Sys.time(),
+    dataset_id = dataset_id,
+    model_id = "bayesian_mediation_v1_te_fixed_sensitivity_A_only",
+    excludes = c("B1_XY", "B2_XM", "brmsfit", "stanfit"),
+    settings = list(
+      rds_path = results$settings$rds_path %||% "data/raw/pt16_emory_GEX_immune_FULL_v2.rds",
+      coord_x = results$settings$coord_x %||% "imagecol",
+      coord_y = results$settings$coord_y %||% "imagerow",
+      exposures = residual_draws$exposures,
+      mediators = residual_draws$mediators,
+      covariates = c("x_coord", "y_coord"),
+      standardize_covariates = results$settings$standardize_covariates %||% TRUE,
+      posterior_mc_draws = baseline$n_draws,
+      posterior_draw_alignment = "Independent fitted-model posterior draws are explicitly Monte Carlo matched by sampled_indices for mediator_joint, outcome, and total models; derived TE, IE, DE, and PM are computed row-wise from those stored indices.",
+      chains = results$settings$chains %||% NA_integer_,
+      iter = results$settings$iter %||% NA_integer_,
+      warmup = results$settings$warmup %||% NA_integer_,
+      seed = seed,
+      A_rho_grid_validated = c(-0.3, 0, 0.3)
+    ),
+    baseline = list(
+      wide = baseline$wide,
+      decomposition_draws = baseline$decomposition_draws,
+      path_draws = baseline$path_draws,
+      decomposition_summary = baseline$decomposition_summary,
+      path_summary = baseline$path_summary,
+      sampled_indices = baseline$sampled_indices,
+      n_draws = baseline$n_draws
+    ),
+    sensitivity_A = list(
+      residual_draws = residual_draws,
+      validation = list(
+        common_rho0_vs_baseline = validate_bayesian_A_rho0_draw_identity(A0_common, baseline),
+        one_at_a_time_rho0_vs_baseline = validate_bayesian_A_rho0_draw_identity(A0_one, baseline),
+        common_vs_one_at_a_time_rho0 = validate_bayesian_A_rho0_scenarios_identical(A0_common, A0_one)
+      )
+    ),
+    diagnostics = list(
+      mcmc = results$diagnostics,
+      predictor_scale_summary = results$data$predictor_scale_summary %||% tibble::tibble(),
+      covariate_scale_info = results$data$covariate_scale_info %||% tibble::tibble()
+    )
+  )
+
+  validate_bayesian_app_artifact(artifact)
+  artifact
+}
+
 require_columns <- function(data, columns, label) {
   missing <- setdiff(columns, names(data))
   if (length(missing) > 0) {

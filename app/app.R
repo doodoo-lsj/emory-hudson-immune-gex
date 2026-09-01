@@ -3110,7 +3110,7 @@ server <- function(input, output, session) {
     }
     if (!is.null(bayesian_current_artifact())) {
       result <- bayesian_current_result()
-      diagnostics <- result$artifact$diagnostics %||% NULL
+      diagnostics <- bayesian_app_mcmc_diagnostics(result$artifact)
       status <- if (!is.null(diagnostics) && all(diagnostics$overall_pass, na.rm = TRUE)) {
         "Bayesian fit is complete and diagnostics passed."
       } else if (!is.null(diagnostics)) {
@@ -3125,10 +3125,10 @@ server <- function(input, output, session) {
 
   output$bayesian_diagnostics_notice <- renderUI({
     artifact <- bayesian_current_artifact()
-    if (is.null(artifact) || is.null(artifact$diagnostics)) {
+    diagnostics <- bayesian_app_mcmc_diagnostics(artifact)
+    if (is.null(artifact) || is.null(diagnostics)) {
       return(NULL)
     }
-    diagnostics <- artifact$diagnostics
     color <- if (all(diagnostics$overall_pass, na.rm = TRUE)) "#1b6e3c" else "#8a5a00"
     tags$details(
       tags$summary("Bayesian fit diagnostics"),
@@ -3146,8 +3146,9 @@ server <- function(input, output, session) {
 
   output$bayesian_diagnostics_table <- renderTable({
     req(bayesian_current_artifact())
-    req(bayesian_current_artifact()$diagnostics)
-    bayesian_current_artifact()$diagnostics |>
+    diagnostics <- bayesian_app_mcmc_diagnostics(bayesian_current_artifact())
+    req(diagnostics)
+    diagnostics |>
       dplyr::transmute(
         model,
         max_Rhat = round(max_Rhat, 3),

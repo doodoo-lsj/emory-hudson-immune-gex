@@ -232,9 +232,10 @@ residual_corr_sensitivity <- function(data,
   observed_summary <- tibble::tibble(
     exposure = exposures,
     TE = te[exposures],
-    NDE = nde_hat[exposures],
+    NDE = te[exposures] - nie_hat[exposures],
     NIE = nie_hat[exposures],
-    PM = nie_hat[exposures] / te[exposures]
+    PM = nie_hat[exposures] / te[exposures],
+    outcome_direct_coef = nde_hat[exposures]
   )
 
   observed_path <- tibble::as_tibble(alpha_mat, rownames = "exposure") |>

@@ -5,7 +5,7 @@
 # B1/B2 sensitivity models and does not persist brmsfit objects in the artifact.
 
 bayesian_dynamic_model_version <- function() {
-  "bayesian_mediation_dynamic_v1"
+  "bayesian_mediation_dynamic_v2_te_fixed"
 }
 
 bayesian_dynamic_default_settings <- function() {
@@ -140,6 +140,7 @@ bayesian_dynamic_formulas <- function(prepared) {
   predictor_terms <- c(prepared$exposures, prepared$covariate_terms)
   mediator_rhs <- bayesian_dynamic_formula_part(predictor_terms)
   outcome_rhs <- bayesian_dynamic_formula_part(c(prepared$exposures, prepared$mediator_model_names, prepared$covariate_terms))
+  total_rhs <- bayesian_dynamic_formula_part(c(prepared$exposures, prepared$covariate_terms))
 
   mediator_bfs <- lapply(prepared$mediator_model_names, function(m) {
     brms::bf(stats::as.formula(paste(m, "~", mediator_rhs)))
@@ -151,7 +152,8 @@ bayesian_dynamic_formulas <- function(prepared) {
 
   list(
     mediator_joint = mediator_joint,
-    outcome = stats::as.formula(paste("Y ~", outcome_rhs))
+    outcome = stats::as.formula(paste("Y ~", outcome_rhs)),
+    total = stats::as.formula(paste("Y ~", total_rhs))
   )
 }
 
@@ -237,7 +239,8 @@ make_bayesian_dynamic_priors <- function(prepared, formulas) {
 
   list(
     mediator_joint = mediator_priors,
-    outcome = make_bayesian_dynamic_priors_for_formula(prepared$data, formulas$outcome)
+    outcome = make_bayesian_dynamic_priors_for_formula(prepared$data, formulas$outcome),
+    total = make_bayesian_dynamic_priors_for_formula(prepared$data, formulas$total)
   )
 }
 
@@ -286,7 +289,23 @@ fit_bayesian_dynamic_models <- function(prepared,
     refresh = settings$refresh
   )
 
-  list(mediator_joint = mediator_fit, outcome = outcome_fit)
+  notify("total_model", "Fitting total-effect model")
+  total_fit <- fit_bayes_v1_single_brm(
+    formula = brms::bf(formulas$total),
+    data = prepared$data,
+    prior = priors$total,
+    chains = settings$chains,
+    iter = settings$iter,
+    warmup = settings$warmup,
+    cores = settings$cores,
+    seed = settings$seed + 3,
+    backend = settings$backend,
+    adapt_delta = settings$adapt_delta,
+    max_treedepth = settings$max_treedepth,
+    refresh = settings$refresh
+  )
+
+  list(mediator_joint = mediator_fit, outcome = outcome_fit, total = total_fit)
 }
 
 extract_bayesian_dynamic_sigma_y <- function(draws_df) {
@@ -319,7 +338,8 @@ extract_bayesian_dynamic_residual_draws <- function(fits,
                                                     sampled_indices = NULL) {
   d_m_all <- posterior::as_draws_df(fits$mediator_joint)
   d_y_all <- posterior::as_draws_df(fits$outcome)
-  available <- c(mediator_joint = nrow(d_m_all), outcome = nrow(d_y_all))
+  d_t_all <- posterior::as_draws_df(fits$total)
+  available <- c(mediator_joint = nrow(d_m_all), outcome = nrow(d_y_all), total = nrow(d_t_all))
 
   if (is.null(sampled_indices)) {
     set.seed(seed)
@@ -328,14 +348,17 @@ extract_bayesian_dynamic_residual_draws <- function(fits,
     }
     idx_m <- sample.int(nrow(d_m_all), n_draws, replace = TRUE)
     idx_y <- sample.int(nrow(d_y_all), n_draws, replace = TRUE)
+    idx_t <- sample.int(nrow(d_t_all), n_draws, replace = TRUE)
   } else {
     idx_m <- sampled_indices$mediator_joint
     idx_y <- sampled_indices$outcome
+    idx_t <- sampled_indices$total
     n_draws <- length(idx_m)
   }
 
   d_m <- d_m_all[idx_m, , drop = FALSE]
   d_y <- d_y_all[idx_y, , drop = FALSE]
+  d_t <- d_t_all[idx_t, , drop = FALSE]
   k <- length(prepared$mediator_model_names)
   mediator_labels <- prepared$mediators
 
@@ -363,8 +386,12 @@ extract_bayesian_dynamic_residual_draws <- function(fits,
     )
   }
 
-  direct <- stats::setNames(
+  outcome_direct_coef <- stats::setNames(
     as.data.frame(lapply(prepared$exposures, function(exposure) extract_bayes_v1_b(d_y, exposure))),
+    prepared$exposures
+  )
+  total_effect <- stats::setNames(
+    as.data.frame(lapply(prepared$exposures, function(exposure) extract_bayes_v1_b(d_t, exposure))),
     prepared$exposures
   )
 
@@ -379,8 +406,9 @@ extract_bayesian_dynamic_residual_draws <- function(fits,
     sigma_y = extract_bayesian_dynamic_sigma_y(d_y),
     beta = beta,
     alpha = alpha,
-    direct = direct,
-    sampled_indices = list(mediator_joint = idx_m, outcome = idx_y),
+    outcome_direct_coef = outcome_direct_coef,
+    total_effect = total_effect,
+    sampled_indices = list(mediator_joint = idx_m, outcome = idx_y, total = idx_t),
     available_draws = available
   )
 
