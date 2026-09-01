@@ -1191,8 +1191,8 @@ run_sensitivity_B_latent_U <- function(data,
       "the estimator maximizes sum_i log[sum_{u=0}^1 P(U_i=u|X_i)",
       "f_3(M_i|X_i,C_i,U_i=u; Sigma_M) f(Y_i|X_i,M_i,C_i,U_i=u; sigma_Y^2)],",
       "with component means M = X_M alpha - lambda_U U and Y = X_Y theta - delta_U U.",
-      "The primary reported mediation TE is TE = direct_effect + total_IIE;",
-      "the separately fitted reduced-form total-model coefficient is retained as TE_reduced_form.",
+      "This latent-U sensitivity routine has a separate internal structural decomposition;",
+      "it is not the primary TE-fixed residual-correlation workflow. The reduced-form total-model coefficient is retained as TE_reduced_form.",
       "Optimization uses stats::optim(method='BFGS') on regression coefficients,",
       "Cholesky-parameterized Sigma_M, and log residual SDs."
     )

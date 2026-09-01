@@ -210,10 +210,10 @@ Y_i =
 TE_A = \tau_A, \quad TE_F = \tau_F
 \]
 
-`NDE` 또는 direct effect는 section 5의 outcome model에서 mediator들을 함께 조정한 exposure coefficient이다.
+`NDE` 또는 reported direct effect는 total effect와 total indirect effect의 차이로 정의된다. Section 5의 outcome model에서 mediator들을 함께 조정한 exposure coefficient는 `outcome_direct_coef`로 별도로 보존되지만, 보고되는 `NDE`에는 사용하지 않는다.
 
 \[
-NDE_A = c'_A, \quad NDE_F = c'_F
+NDE_A = TE_A - NIE_A, \quad NDE_F = TE_F - NIE_F
 \]
 
 `NIE` 또는 total indirect effect는 mediator-specific indirect components의 합으로 계산된다.
@@ -236,7 +236,7 @@ PM_A = \frac{NIE_A}{TE_A}, \quad PM_F = \frac{NIE_F}{TE_F}
 
 `TE`, `NDE`, `NIE`, `PM`은 `X_adjacent`와 `X_far`에 대해 각각 별도로 계산된다. 따라서 `adjacent vs inside`와 `far vs inside`는 같은 model 안에서 동시에 parameterized된 두 contrast이다.
 
-코드는 `TE`를 total effect model에서 따로 추정하고, `NDE`를 outcome model에서 추출하며, `NIE`를 \(\sum_j \alpha_j \beta_j\)로 계산한다. `TE = NDE + NIE`를 별도 assignment로 강제하지는 않는다. 동일 sample, 동일 covariates, additive linear models, no exposure-mediator interaction의 product-of-coefficients decomposition에서는 이 관계가 선형회귀 분해로 해석된다. 이 문서의 `NDE`와 `NIE` 용어는 코드의 naming을 유지한 것이며, 별도 counterfactual natural effect estimator가 구현되어 있다는 뜻은 아니다.
+코드는 `TE`를 total effect model에서 따로 추정하고, `NIE`를 \(\sum_j \alpha_j \beta_j\)로 계산한 뒤 `NDE = TE - NIE`로 계산한다. 따라서 현재 구현에서는 `TE = NDE + NIE`가 정의상 성립한다. Outcome model의 exposure coefficient는 `outcome_direct_coef`라는 내부 진단량으로 별도 보존된다. 동일 sample, 동일 covariates, additive linear models, no exposure-mediator interaction의 product-of-coefficients decomposition에서는 이 관계가 선형회귀 분해로 해석된다. 이 문서의 `NDE`와 `NIE` 용어는 코드의 naming을 유지한 것이며, 별도 counterfactual natural effect estimator가 구현되어 있다는 뜻은 아니다.
 
 ## 8. Bootstrap uncertainty
 

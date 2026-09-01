@@ -75,7 +75,7 @@ run_bayesian_sensitivity <- function(
     max_treedepth = max_treedepth
   )
 
-  cat("\nBayesian baseline decomposition, primary TE = direct + total_IIE\n")
+  cat("\nBayesian baseline decomposition, primary TE = reduced-form total-effect model coefficient\n")
   print(baseline_quantities$decomposition_summary)
 
   cat("\nBayesian baseline path summary\n")
