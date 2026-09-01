@@ -827,24 +827,48 @@ ui <- navbarPage(
       }
 	      .setup-sidebar .btn-primary {
 	        width: 100%;
-	        background-color: var(--app-accent);
-	        border-color: var(--app-accent);
 	      }
-		      .btn-primary {
-		        background-color: var(--app-accent);
-		        border-color: var(--app-accent);
+		      .btn-primary,
+		      .btn.btn-primary,
+		      .action-button.btn-primary,
+		      input.btn-primary {
+		        background-color: var(--app-accent) !important;
+		        border-color: var(--app-accent) !important;
 		        color: #ffffff !important;
 		        font-weight: 700;
 		      }
 		      .btn-primary:visited,
-		      .btn-primary:active {
+		      .btn-primary:active,
+		      .btn.btn-primary:visited,
+		      .btn.btn-primary:active,
+		      .action-button.btn-primary:visited,
+		      .action-button.btn-primary:active {
 		        color: #ffffff !important;
 		      }
 		      .btn-primary:hover,
-		      .btn-primary:focus {
-		        background-color: #1f3978;
-		        border-color: #1f3978;
+		      .btn-primary:focus,
+		      .btn.btn-primary:hover,
+		      .btn.btn-primary:focus,
+		      .action-button.btn-primary:hover,
+		      .action-button.btn-primary:focus,
+		      input.btn-primary:hover,
+		      input.btn-primary:focus {
+		        background-color: #1f3978 !important;
+		        border-color: #1f3978 !important;
 		        color: #ffffff !important;
+		      }
+		      .btn-primary[disabled],
+		      .btn-primary.disabled,
+		      .btn.btn-primary[disabled],
+		      .btn.btn-primary.disabled,
+		      .action-button.btn-primary[disabled],
+		      .action-button.btn-primary.disabled,
+		      input.btn-primary[disabled],
+		      input.btn-primary.disabled {
+		        background-color: #6f7fb3 !important;
+		        border-color: #6f7fb3 !important;
+		        color: #ffffff !important;
+		        opacity: 0.88;
 		      }
 	      .btn-default {
 	        background: #ffffff;
@@ -1071,6 +1095,19 @@ ui <- navbarPage(
         margin-top: 8px;
         font-size: 13px;
       }
+      .setup-requirement-list {
+        margin: 8px 0 0 0;
+        padding-left: 20px;
+      }
+      .setup-requirement-list > li {
+        margin-bottom: 10px;
+      }
+      .setup-requirement-list ul {
+        color: var(--app-muted);
+        font-size: 13px;
+        margin-top: 5px;
+        padding-left: 18px;
+      }
 	      .workflow-context-card {
 	        background: var(--app-soft);
 	        border: 1px solid #e5edf5;
@@ -1167,6 +1204,14 @@ ui <- navbarPage(
         font-size: 12px;
         margin-top: 4px;
       }
+      .overview-action-row {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 14px;
+      }
+      .overview-action-row .btn {
+        min-width: 170px;
+      }
       .app-kv-item {
         display: flex;
         justify-content: space-between;
@@ -1240,6 +1285,16 @@ ui <- navbarPage(
       }
       .pca-loading-controls .form-group {
         margin-bottom: 0;
+      }
+      .pca-orientation-help {
+        background: var(--app-blue-soft);
+        border: 1px solid #d6e6ff;
+        border-radius: 8px;
+        color: var(--app-ink);
+        font-size: 12px;
+        line-height: 1.45;
+        margin-bottom: 10px;
+        padding: 9px 10px;
       }
 	      .pca-detail-grid {
 	        display: grid;
@@ -1697,6 +1752,12 @@ ui <- navbarPage(
         .overview-metric-row {
           grid-template-columns: 1fr;
         }
+        .overview-action-row {
+          justify-content: stretch;
+        }
+        .overview-action-row .btn {
+          width: 100%;
+        }
         .pca-shell,
         .pca-secondary-grid,
         .pca-loading-controls,
@@ -1843,7 +1904,7 @@ ui <- navbarPage(
         ),
         app_setup_section(
           "Prepare",
-          actionButton("prepare_analysis", "Prepare Analysis", class = "btn-primary"),
+          actionButton("prepare_analysis", "Prepare Analysis and Continue", class = "btn-primary"),
           uiOutput("prepare_message")
         )
 	      ),
@@ -1871,6 +1932,10 @@ ui <- navbarPage(
         app_panel_card("Dataset", uiOutput("overview_dataset")),
         app_panel_card("Exposure Categories", uiOutput("overview_exposure")),
         app_panel_card("Model Setup", uiOutput("overview_variables"))
+      ),
+      div(
+        class = "overview-action-row",
+        actionButton("go_to_pca_from_overview", "Continue to PCA", class = "btn-primary")
       )
     )
   ),
@@ -2000,8 +2065,12 @@ ui <- navbarPage(
 )
 
 server <- function(input, output, session) {
-  analysis_state <- reactiveVal(example_analysis)
-  setup_status <- reactiveVal(list(ok = TRUE, message = "Example dataset is prepared and ready."))
+  analysis_state <- reactiveVal(NULL)
+  setup_status <- reactiveVal(list(
+    ok = FALSE,
+    error = FALSE,
+    message = "Click Prepare Analysis and Continue to start with the example dataset."
+  ))
   bayesian_fit_state <- reactiveVal(NULL)
   bayesian_fit_cache <- reactiveVal(list())
   bayesian_fit_running <- reactiveVal(FALSE)
@@ -2012,6 +2081,27 @@ server <- function(input, output, session) {
   frequentist_fit_running <- reactiveVal(FALSE)
   sensitivity_warmup_status <- reactiveVal(NULL)
   confirmed_pca_spec <- reactiveVal(NULL)
+
+  clear_workflow_results <- function() {
+    confirmed_pca_spec(NULL)
+    bayesian_fit_state(NULL)
+    bayesian_fit_cache(list())
+    frequentist_fit_state(NULL)
+    frequentist_fit_cache(list())
+    frequentist_bootstrap_cache(list())
+    frequentist_sensitivity_cache(list())
+    sensitivity_warmup_status(NULL)
+  }
+
+  set_analysis_unprepared <- function(message = "Upload both datasets, confirm variable roles, then prepare the analysis.", notify = FALSE) {
+    clear_workflow_results()
+    analysis_state(NULL)
+    setup_status(list(ok = FALSE, error = FALSE, message = message))
+    updateTabsetPanel(session, "main_nav", selected = "Data Setup")
+    if (isTRUE(notify)) {
+      showNotification(message, type = "message")
+    }
+  }
 
   safe_read_table <- function(file, sheet) {
     if (is.null(file)) {
@@ -2066,6 +2156,26 @@ server <- function(input, output, session) {
     x$defaults <- list()
     x
   })
+
+  observeEvent(input$data_source, {
+    if (identical(input$data_source %||% "example", "example")) {
+      set_analysis_unprepared("Click Prepare Analysis and Continue to start with the example dataset.")
+    } else {
+      set_analysis_unprepared()
+    }
+  }, ignoreInit = TRUE)
+
+  observeEvent(input$main_file, {
+    if (identical(input$data_source %||% "example", "upload")) {
+      set_analysis_unprepared("Main dataset selected. Confirm roles and prepare the analysis.")
+    }
+  }, ignoreInit = TRUE)
+
+  observeEvent(input$feature_file, {
+    if (identical(input$data_source %||% "example", "upload")) {
+      set_analysis_unprepared("Feature matrix selected. Confirm matching and prepare the analysis.")
+    }
+  }, ignoreInit = TRUE)
 
   main_data_current <- reactive({
     x <- main_input()
@@ -2285,31 +2395,40 @@ server <- function(input, output, session) {
     )
 
     result <- tryCatch({
-      spec <- build_analysis_spec(
-        data_source = input$data_source %||% "example",
-        main_data = main_data_current(),
-        feature_data = feature_data_current(),
-        roles = roles,
-        feature_id = input$feature_observation_id %||% "",
-        excluded_feature_columns = character(0)
-      )
-      analysis_obj <- compute_analysis_from_spec(spec)
-      list(ok = TRUE, spec = spec, analysis = analysis_obj, message = "Analysis data prepared successfully.")
+      withProgress(message = "Preparing analysis data", value = 0, {
+        setProgress(0.08, detail = "Checking selected variables and uploaded files")
+        spec <- build_analysis_spec(
+          data_source = input$data_source %||% "example",
+          main_data = main_data_current(),
+          feature_data = feature_data_current(),
+          roles = roles,
+          feature_id = input$feature_observation_id %||% "",
+          excluded_feature_columns = character(0)
+        )
+        setProgress(0.35, detail = "Matching observations across datasets")
+        setProgress(0.55, detail = "Preparing PCA inputs from the feature matrix")
+        analysis_obj <- compute_analysis_from_spec(spec)
+        setProgress(0.95, detail = "Preparing app views")
+        list(ok = TRUE, spec = spec, analysis = analysis_obj, message = "Analysis data prepared successfully.")
+      })
     }, error = function(e) {
       list(ok = FALSE, message = conditionMessage(e))
     })
 
     if (isTRUE(result$ok)) {
       analysis_state(result$analysis)
-      setup_status(list(ok = TRUE, message = result$message))
+      setup_status(list(ok = TRUE, error = FALSE, message = result$message))
 	      confirmed_pca_spec(NULL)
 	      bayesian_fit_state(NULL)
+	      bayesian_fit_cache(list())
 	      frequentist_fit_state(NULL)
+	      frequentist_fit_cache(list())
 	      frequentist_bootstrap_cache(list())
+	      frequentist_sensitivity_cache(list())
 	      sensitivity_warmup_status(NULL)
-      updateTabsetPanel(session, "main_nav", selected = "PCA")
+      updateTabsetPanel(session, "main_nav", selected = "Overview")
     } else {
-      setup_status(list(ok = FALSE, message = result$message))
+      setup_status(list(ok = FALSE, error = TRUE, message = result$message))
     }
   }, ignoreInit = TRUE)
 
@@ -2319,7 +2438,13 @@ server <- function(input, output, session) {
       return(tags$div(class = "setup-status setup-meta", "Upload both datasets, then prepare the analysis."))
     }
     status <- setup_status()
-    color <- if (isTRUE(status$ok)) "#1b6e3c" else "#9b1c1c"
+    color <- if (isTRUE(status$ok)) {
+      "#1b6e3c"
+    } else if (isTRUE(status$error)) {
+      "#9b1c1c"
+    } else {
+      "#5f6f7f"
+    }
     tags$div(class = "setup-status", style = paste0("color:", color, ";"), status$message)
   })
 
@@ -2347,10 +2472,26 @@ server <- function(input, output, session) {
         return(app_panel_card(
           "Upload your data to begin",
           class = "setup-empty",
-          tags$p("Use the controls on the left to upload:"),
+          tags$p("Use the controls on the left to upload two matched files:"),
           tags$ol(
-            tags$li("a main analysis dataset"),
-            tags$li("a mediator gene or feature matrix")
+            class = "setup-requirement-list",
+            tags$li(
+              tags$strong("A main analysis dataset"),
+              tags$ul(
+                tags$li("one observation ID column shared with the feature matrix"),
+                tags$li("one categorical exposure/treatment column"),
+                tags$li("one numeric outcome column"),
+                tags$li("two numeric spatial coordinate columns"),
+                tags$li("optional covariate columns")
+              )
+            ),
+            tags$li(
+              tags$strong("A mediator gene or feature matrix"),
+              tags$ul(
+                tags$li("the same observation ID column"),
+                tags$li("numeric mediator, gene, or feature columns")
+              )
+            )
           ),
           tags$p("After both files are available, previews and validation will appear here.")
         ))
@@ -2940,6 +3081,10 @@ server <- function(input, output, session) {
     updateTabsetPanel(session, "main_nav", selected = "Mediation")
   }, ignoreInit = TRUE)
 
+  observeEvent(input$go_to_pca_from_overview, {
+    updateTabsetPanel(session, "main_nav", selected = "PCA")
+  }, ignoreInit = TRUE)
+
   observe({
 	    data_done <- isTRUE(setup_status()$ok) && !is.null(analysis())
 	    pca_done <- isTRUE(pca_config_confirmed()) && !isTRUE(pca_has_unconfirmed_changes())
@@ -2951,10 +3096,10 @@ server <- function(input, output, session) {
 
     steps <- list(
       list(value = "Data Setup", workflow = TRUE, completed = data_done, available = TRUE),
-      list(value = "Overview", workflow = FALSE, completed = FALSE, available = data_done),
+      list(value = "Overview", workflow = FALSE, completed = data_done, available = data_done),
       list(value = "PCA", workflow = TRUE, completed = pca_done, available = data_done),
       list(value = "Mediation", workflow = TRUE, completed = mediation_done, available = pca_done),
-      list(value = "Sensitivity", workflow = TRUE, completed = FALSE, available = sensitivity_available)
+      list(value = "Sensitivity", workflow = TRUE, completed = sensitivity_available, available = sensitivity_available)
     )
     session$sendCustomMessage("setNavWorkflow", list(steps = steps))
   })
@@ -3043,14 +3188,21 @@ server <- function(input, output, session) {
 
     settings <- bayesian_dynamic_settings()
     result <- tryCatch({
-      artifact <- withProgress(message = "Running Bayesian mediation", value = 0, {
+      artifact <- withProgress(message = "Running Bayesian mediation model", value = 0, {
         setProgress(0.02, detail = "Preparing model data")
         progress_values <- c(
           prepare = 0.08,
-          mediator_model = 0.15,
-          outcome_model = 0.55,
-          posterior_processing = 0.82,
-          diagnostics = 0.92
+          mediator_model = 0.20,
+          outcome_model = 0.58,
+          posterior_processing = 0.84,
+          diagnostics = 0.94
+        )
+        progress_labels <- c(
+          prepare = "Preparing model data",
+          mediator_model = "Fitting mediator model (stage 1 of 2)",
+          outcome_model = "Fitting outcome model (stage 2 of 2)",
+          posterior_processing = "Summarizing posterior draws",
+          diagnostics = "Checking MCMC diagnostics"
         )
         make_bayesian_dynamic_artifact(
           analysis_obj = analysis(),
@@ -3058,7 +3210,12 @@ server <- function(input, output, session) {
           pc_signs = confirmed_pc_sign_vector(),
           settings = settings,
           progress_callback = function(step, detail = NULL) {
-            setProgress(progress_values[[step]] %||% 0.5, detail = detail %||% step)
+            stage_label <- if (step %in% names(progress_labels)) progress_labels[[step]] else step
+            if (!is.null(detail) && nzchar(detail)) {
+              stage_label <- paste(stage_label, detail, sep = ": ")
+            }
+            stage_value <- if (step %in% names(progress_values)) progress_values[[step]] else 0.5
+            setProgress(stage_value, detail = stage_label)
           }
         )
       })
@@ -3358,29 +3515,36 @@ server <- function(input, output, session) {
   output$pca_pc_controls <- renderUI({
     candidates <- pc_candidate_ids(analysis(), max_pcs = 6)
 
-    tagList(lapply(seq_along(candidates), function(i) {
-      pc <- candidates[[i]]
-      selected_id <- paste0("pca_pc", i, "_selected")
-      orientation_id <- paste0("pc", i, "_orientation")
-      is_selected <- input[[selected_id]] %||% TRUE
-
+    tagList(
       tags$div(
-        class = "pca-pc-row",
-        checkboxInput(selected_id, pc, value = isTRUE(is_selected)),
-        if (isTRUE(is_selected)) {
-          tags$div(
-            class = "pca-pc-orientation",
-            radioButtons(
-              orientation_id,
-              NULL,
-              choices = c("Keep" = "keep", "Reverse" = "reverse"),
-              selected = input[[orientation_id]] %||% "keep",
-              inline = TRUE
+        class = "pca-orientation-help",
+        tags$strong("Sign orientation: "),
+        "Keep/Reverse only flips the sign direction of a PC. Variance explained is unchanged; the selected orientation is used for maps, loading direction, and mediation."
+      ),
+      lapply(seq_along(candidates), function(i) {
+        pc <- candidates[[i]]
+        selected_id <- paste0("pca_pc", i, "_selected")
+        orientation_id <- paste0("pc", i, "_orientation")
+        is_selected <- input[[selected_id]] %||% TRUE
+
+        tags$div(
+          class = "pca-pc-row",
+          checkboxInput(selected_id, pc, value = isTRUE(is_selected)),
+          if (isTRUE(is_selected)) {
+            tags$div(
+              class = "pca-pc-orientation",
+              radioButtons(
+                orientation_id,
+                NULL,
+                choices = c("Keep" = "keep", "Reverse" = "reverse"),
+                selected = input[[orientation_id]] %||% "keep",
+                inline = TRUE
+              )
             )
-          )
-        }
-      )
-    }))
+          }
+        )
+      })
+    )
   })
 
   oriented_spatial_df <- reactive({
@@ -3812,9 +3976,9 @@ server <- function(input, output, session) {
       return("")
     }
     if (!is.na(pr_gt) && (is.na(pr_lt) || pr_gt >= pr_lt)) {
-      return(paste0(format_number(100 * pr_gt, 1), "% positive"))
+      return(paste0("Pr(positive) = ", format_number(100 * pr_gt, 1), "%"))
     }
-    paste0(format_number(100 * pr_lt, 1), "% negative")
+    paste0("Pr(negative) = ", format_number(100 * pr_lt, 1), "%")
   }
 
   frequentist_path_cell <- function(est, lwr = NA_real_, upr = NA_real_, digits = 4) {
@@ -3829,7 +3993,7 @@ server <- function(input, output, session) {
       return(tags$p(class = "setup-meta", "No path rows match the current filters."))
     }
 	    header <- if (identical(framework, "bayesian")) {
-	      c("Contrast", "Mediator", "Exposure -> Mediator", "Mediator -> Outcome", "Indirect Effect", "Evidence")
+	      c("Contrast", "Mediator", "Exposure -> Mediator", "Mediator -> Outcome", "Indirect Effect", "Posterior Direction")
 	    } else {
 	      c("Contrast", "Mediator", "Exposure -> Mediator", "Mediator -> Outcome", "Indirect Effect")
 	    }
@@ -4178,15 +4342,7 @@ server <- function(input, output, session) {
                 tags$p(class = "setup-meta", if (identical(framework, "bayesian")) "Posterior mean with 95% credible interval." else "Point estimates at the selected rho."),
                 uiOutput("sensitivity_selected_decomposition")
               ),
-              uiOutput(warning_id),
-              tags$details(
-                tags$summary("Technical details"),
-                if (identical(framework, "frequentist")) {
-                  tagList(h4("Validation"), verbatimTextOutput("rho0_validation"))
-                } else {
-                  tags$p(class = "setup-meta", "Feasibility and PM warnings are shown above only when needed.")
-                }
-              )
+              uiOutput(warning_id)
             ),
             if (identical(scenario, "common")) {
               tabPanel(
